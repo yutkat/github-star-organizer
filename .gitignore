@@ -1,0 +1,5 @@
+.github/aw-input/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.venv/

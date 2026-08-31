@@ -1,0 +1,10 @@
+[project]
+name = "github-star-organizer"
+version = "0.1.0"
+description = "Categorize GitHub stars into GitHub Lists with an agentic workflow"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false

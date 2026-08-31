@@ -1,0 +1,14 @@
+manifest-version: "1"
+min-version: v0.86.2
+name: GitHub Star Organizer
+emoji: "⭐"
+description: Categorize starred repositories into the token owner's GitHub Lists.
+
+includes:
+  - .github/workflows/categorize-stars.md
+
+config:
+  - type: repo-secret
+    name: COPILOT_GITHUB_TOKEN
+    prompt: Paste a fine-grained PAT for Copilot and GitHub Lists
+    description: Grant Copilot Requests and Starring (Read and write).
