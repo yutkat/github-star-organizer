@@ -21,7 +21,7 @@ resources:
       scope:
         description: Process the full backlog or only stars from the last 7 days
         required: false
-        default: full
+        default: weekly
         type: choice
         options:
           - full
@@ -29,6 +29,7 @@ resources:
 permissions:
   contents: read
 engine: copilot
+model: gpt-5-mini
 steps:
   - name: Check out repository
     uses: actions/checkout@v7
@@ -45,7 +46,7 @@ steps:
       COPILOT_GITHUB_TOKEN: "${{ secrets.COPILOT_GITHUB_TOKEN }}"
       STAR_SCOPE: >-
         ${{ github.event_name == 'schedule' && 'weekly' ||
-        github.event.inputs.scope || 'full' }}
+        github.event.inputs.scope || 'weekly' }}
     run: |
       mkdir -p .github/aw-input
       uv run --frozen \
@@ -75,6 +76,8 @@ tools:
   edit: null
   bash:
     - cat .github/aw-input/categorization-input.json
+    - jq -r
+    - jq -c
 timeout-minutes: 20
 ---
 
@@ -94,6 +97,24 @@ Only create `.github/aw-input/categorization-plan.json`. Do not edit the input,
 tracked files, or call GitHub APIs. Copy `source_sha256` from the input exactly.
 A deterministic post-step verifies the input digest and plan before applying it
 with GitHub GraphQL mutations. The API token is not available to you.
+
+Work directly in this agent and do not delegate to a sub-agent. Do not invoke
+Python, Node.js, Git, heredocs, file copies, or exploratory shell commands. Use
+only the exact allowlisted `jq` commands to read the digest, existing Lists, and
+five repository chunks. Empty trailing chunks are expected. After reading the
+chunks, write the complete plan once with the edit tool.
+
+Run these commands without modification:
+
+```bash
+jq -r '.source_sha256' .github/aw-input/categorization-input.json
+jq -c '.existing_lists[]' .github/aw-input/categorization-input.json
+jq -c '.repositories[0:100][]' .github/aw-input/categorization-input.json
+jq -c '.repositories[100:200][]' .github/aw-input/categorization-input.json
+jq -c '.repositories[200:300][]' .github/aw-input/categorization-input.json
+jq -c '.repositories[300:400][]' .github/aw-input/categorization-input.json
+jq -c '.repositories[400:500][]' .github/aw-input/categorization-input.json
+```
 
 ## Input format
 

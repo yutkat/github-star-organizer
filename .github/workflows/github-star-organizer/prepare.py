@@ -22,7 +22,7 @@ from plan import create_input
 def prepare_input(
     client: GraphQLExecutor,
     batch_size: int,
-    scope: str = "full",
+    scope: str = "weekly",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     if not 1 <= batch_size <= 500:
@@ -67,7 +67,7 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--batch-size", type=int, default=500)
-    result.add_argument("--scope", choices=("full", "weekly"), default="full")
+    result.add_argument("--scope", choices=("full", "weekly"), default="weekly")
     result.add_argument("--output", type=Path, required=True)
     return result
 

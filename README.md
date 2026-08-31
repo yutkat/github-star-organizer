@@ -41,8 +41,8 @@ See GitHub's documentation for
 - Runs weekly on Monday at a time distributed by GitHub Agentic Workflows and
   supports manual dispatch.
 - Scheduled runs inspect only stars added during the preceding seven days.
-- Manual runs default to the full uncategorized backlog and can optionally use
-  the same weekly scope.
+- Manual runs default to the same weekly scope; select `full` explicitly to
+  process the complete uncategorized backlog.
 - Retrieves the token owner's stars and Lists, without a hard-coded username.
 - Skips repositories that already belong to at least one List.
 - Preserves existing and concurrent List memberships.

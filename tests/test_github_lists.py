@@ -139,7 +139,7 @@ class GitHubListTests(unittest.TestCase):
             GitHubGraphQL("ghu_example")
 
     def test_prepare_only_returns_unlisted_stars(self):
-        prepared = prepare_input(FakeGraphQL(), 100)
+        prepared = prepare_input(FakeGraphQL(), 100, "full")
 
         self.assertEqual("octocat", prepared["viewer_login"])
         self.assertEqual(["R_new"], [item["id"] for item in prepared["repositories"]])
@@ -154,13 +154,13 @@ class GitHubListTests(unittest.TestCase):
         self.assertEqual(0, prepared["stats"]["starred_in_scope"])
 
     def test_plan_requires_each_repository_exactly_once(self):
-        prepared_input = create_input(prepare_input(FakeGraphQL(), 100))
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
         plan = empty_plan(prepared_input)
         with self.assertRaisesRegex(ValueError, "assignment mismatch"):
             validate_plan(prepared_input, plan)
 
     def test_dry_run_previews_without_graphql_mutations(self):
-        prepared_input = create_input(prepare_input(FakeGraphQL(), 100))
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
         plan = empty_plan(prepared_input)
         plan["assignments"] = [{"repository_id": "R_new", "list_ref": "UL_tools"}]
 
@@ -171,7 +171,7 @@ class GitHubListTests(unittest.TestCase):
 
     def test_apply_creates_list_and_assigns_repository(self):
         client = FakeGraphQL()
-        prepared_input = create_input(prepare_input(client, 100))
+        prepared_input = create_input(prepare_input(client, 100, "full"))
         plan = empty_plan(prepared_input)
         plan["new_lists"] = [
             {
@@ -193,7 +193,7 @@ class GitHubListTests(unittest.TestCase):
 
     def test_apply_preserves_concurrent_membership(self):
         client = FakeGraphQL()
-        prepared_input = create_input(prepare_input(client, 100))
+        prepared_input = create_input(prepare_input(client, 100, "full"))
         plan = empty_plan(prepared_input)
         client.items["UL_tools"].add("R_new")
         plan["new_lists"] = [
@@ -216,7 +216,7 @@ class GitHubListTests(unittest.TestCase):
         )
 
     def test_rejects_modified_plan_source(self):
-        prepared_input = create_input(prepare_input(FakeGraphQL(), 100))
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
         plan = empty_plan(prepared_input)
         prepared_input["repositories"] = []
 
