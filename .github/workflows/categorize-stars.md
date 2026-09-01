@@ -76,8 +76,7 @@ tools:
   edit: null
   bash:
     - cat .github/aw-input/categorization-input.json
-    - jq -r
-    - jq -c
+    - "jq *"
 timeout-minutes: 45
 ---
 
