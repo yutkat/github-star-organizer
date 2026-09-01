@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
+import json
 import sys
 import unittest
+import urllib.error
 from datetime import UTC, datetime
 from importlib import util
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from unittest import mock
 
 RUNTIME_PATH = (
     Path(__file__).parents[1] / ".github" / "workflows" / "github-star-organizer"
@@ -202,6 +206,61 @@ class ListMembershipTests(unittest.TestCase):
     def test_rejects_deleted_lists(self):
         with self.assertRaisesRegex(ValueError, "no longer exists"):
             list_memberships(FakeGraphQL(), ["UL_gone"])
+
+
+def http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "https://api.github.com/graphql",
+        code,
+        "Bad Gateway",
+        None,
+        io.BytesIO(b"<html>"),
+    )
+
+
+class RetryTests(unittest.TestCase):
+    def run_execute(self, responses: list[Any]) -> tuple[Any, list[float]]:
+        client = GitHubGraphQL("github_pat_example")
+        sleeps: list[float] = []
+
+        def fake_urlopen(request, timeout=None):
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with (
+            mock.patch.object(github_api.urllib.request, "urlopen", fake_urlopen),
+            mock.patch.object(github_api.time, "sleep", sleeps.append),
+        ):
+            return client.execute("query", {}), sleeps
+
+    def test_execute_retries_transient_server_errors(self):
+        success = io.BytesIO(json.dumps({"data": {"ok": True}}).encode())
+
+        data, sleeps = self.run_execute([http_error(502), http_error(503), success])
+
+        self.assertEqual({"ok": True}, data)
+        self.assertEqual([2, 4], sleeps)
+
+    def test_execute_gives_up_after_max_attempts(self):
+        with self.assertRaisesRegex(RuntimeError, "HTTP 502"):
+            self.run_execute([http_error(502)] * 4)
+
+    def test_execute_does_not_retry_client_errors(self):
+        client = GitHubGraphQL("github_pat_example")
+        sleeps: list[float] = []
+        with (
+            mock.patch.object(
+                github_api.urllib.request,
+                "urlopen",
+                mock.Mock(side_effect=http_error(401)),
+            ),
+            mock.patch.object(github_api.time, "sleep", sleeps.append),
+            self.assertRaisesRegex(RuntimeError, "HTTP 401"),
+        ):
+            client.execute("query", {})
+        self.assertEqual([], sleeps)
 
 
 class GitHubListTests(unittest.TestCase):

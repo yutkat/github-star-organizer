@@ -3,10 +3,27 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
 from typing import Any, Protocol
+
+RETRYABLE_STATUS = {502, 503, 504}
+MAX_ATTEMPTS = 4
+BACKOFF_SECONDS = 2
+
+
+def urlopen_with_retry(request: urllib.request.Request) -> Any:
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return urllib.request.urlopen(request, timeout=60)
+        except urllib.error.HTTPError as error:
+            if error.code not in RETRYABLE_STATUS or attempt + 1 == MAX_ATTEMPTS:
+                raise
+            time.sleep(BACKOFF_SECONDS * 2**attempt)
+    raise AssertionError("unreachable")
+
 
 LISTS_QUERY = """
 query Lists($cursor: String) {
@@ -116,7 +133,7 @@ class GitHubGraphQL:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urlopen_with_retry(request) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as error:
             body = error.read().decode(errors="replace")
