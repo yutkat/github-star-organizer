@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -125,7 +126,14 @@ class GitHubGraphQL:
             body = error.read().decode(errors="replace")
             raise RuntimeError(f"GitHub GraphQL HTTP {error.code}: {body}") from error
         if result.get("errors"):
-            raise RuntimeError(f"GitHub GraphQL errors: {result['errors']}")
+            # Node-level errors (e.g. org token policies) null the affected
+            # nodes but leave the rest of the response usable.
+            if result.get("data") is None:
+                raise RuntimeError(f"GitHub GraphQL errors: {result['errors']}")
+            print(
+                f"GitHub GraphQL partial errors: {result['errors']}",
+                file=sys.stderr,
+            )
         return result["data"]
 
 
@@ -184,6 +192,8 @@ def starred_repositories(
             if cutoff is not None and starred_at < cutoff:
                 return repositories
             repository = edge["node"]
+            if repository is None:
+                continue
             repositories.append(
                 {
                     "id": repository["id"],

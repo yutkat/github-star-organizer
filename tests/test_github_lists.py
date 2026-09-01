@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import sys
@@ -40,6 +41,7 @@ LISTS_QUERY = github_api.LISTS_QUERY
 STARS_QUERY = github_api.STARS_QUERY
 GitHubGraphQL = github_api.GitHubGraphQL
 list_memberships = github_api.list_memberships
+starred_repositories = github_api.starred_repositories
 create_input = plan_envelope.create_input
 prepare_input = prepare.prepare_input
 apply_plan = apply.apply_plan
@@ -68,6 +70,13 @@ class FakeGraphQL:
             }
         ]
         self.items = {"UL_tools": {"R_listed"}}
+        self.star_edges = [
+            {"starredAt": "2026-01-02T00:00:00Z", "node": repo("R_new", "new/tool")},
+            {
+                "starredAt": "2026-01-01T00:00:00Z",
+                "node": repo("R_listed", "old/tool"),
+            },
+        ]
 
     def items_page(self, list_id: str, cursor: str | None) -> dict[str, Any]:
         item_ids = sorted(self.items.get(list_id, set()))
@@ -103,18 +112,9 @@ class FakeGraphQL:
             return {
                 "viewer": {
                     "starredRepositories": {
-                        "edges": [
-                            {
-                                "starredAt": "2026-01-02T00:00:00Z",
-                                "node": repo("R_new", "new/tool"),
-                            },
-                            {
-                                "starredAt": "2026-01-01T00:00:00Z",
-                                "node": repo("R_listed", "old/tool"),
-                            },
-                        ],
+                        "edges": self.star_edges,
                         "pageInfo": {"hasNextPage": False, "endCursor": None},
-                        "totalCount": 2,
+                        "totalCount": len(self.star_edges),
                     }
                 }
             }
@@ -235,6 +235,45 @@ class RetryTests(unittest.TestCase):
         ):
             client.execute("query", {})
         self.assertEqual([], sleeps)
+
+
+class PartialResponseTests(unittest.TestCase):
+    def execute_with_payload(
+        self, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
+        client = GitHubGraphQL("github_pat_example")
+        response = io.BytesIO(json.dumps(payload).encode())
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                github_api.urllib.request, "urlopen", mock.Mock(return_value=response)
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            return client.execute("query", {}), stderr.getvalue()
+
+    def test_execute_keeps_partial_data_despite_node_errors(self):
+        payload = {
+            "data": {"node": {"items": {"nodes": [None, {"id": "R_ok"}]}}},
+            "errors": [{"type": "FORBIDDEN", "message": "org token policy"}],
+        }
+
+        data, stderr = self.execute_with_payload(payload)
+
+        self.assertEqual(payload["data"], data)
+        self.assertIn("FORBIDDEN", stderr)
+
+    def test_execute_raises_when_errors_leave_no_data(self):
+        with self.assertRaisesRegex(RuntimeError, "GraphQL errors"):
+            self.execute_with_payload({"data": None, "errors": [{"message": "boom"}]})
+
+    def test_stars_skip_inaccessible_repositories(self):
+        client = FakeGraphQL()
+        client.star_edges.insert(0, {"starredAt": "2026-01-03T00:00:00Z", "node": None})
+
+        stars = starred_repositories(client)
+
+        self.assertEqual(["R_new", "R_listed"], [star["id"] for star in stars])
 
 
 class GitHubListTests(unittest.TestCase):
