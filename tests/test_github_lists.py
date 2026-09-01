@@ -35,7 +35,6 @@ prepare = load_runtime_module("prepare")
 apply = load_runtime_module("apply")
 
 ASSIGN_LIST_MUTATION = github_api.ASSIGN_LIST_MUTATION
-CREATE_LIST_MUTATION = github_api.CREATE_LIST_MUTATION
 LIST_ITEMS_QUERY = github_api.LIST_ITEMS_QUERY
 LISTS_QUERY = github_api.LISTS_QUERY
 STARS_QUERY = github_api.STARS_QUERY
@@ -52,7 +51,6 @@ validate_plan = apply.validate_plan
 def empty_plan(prepared_input: dict[str, Any]) -> dict[str, Any]:
     return {
         "assignments": [],
-        "new_lists": [],
         "source_sha256": prepared_input["source_sha256"],
     }
 
@@ -60,6 +58,7 @@ def empty_plan(prepared_input: dict[str, Any]) -> dict[str, Any]:
 class FakeGraphQL:
     def __init__(self, page_size: int | None = None):
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.partial_flags: list[bool] = []
         self.page_size = page_size
         self.lists = [
             {
@@ -90,8 +89,11 @@ class FakeGraphQL:
             },
         }
 
-    def execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, query: str, variables: dict[str, Any], allow_partial: bool = False
+    ) -> dict[str, Any]:
         self.calls.append((query, variables))
+        self.partial_flags.append(allow_partial)
         if query == LISTS_QUERY:
             return {
                 "viewer": {
@@ -118,16 +120,6 @@ class FakeGraphQL:
                     }
                 }
             }
-        if query == CREATE_LIST_MUTATION:
-            created = {
-                "id": "UL_ai",
-                "name": variables["input"]["name"],
-                "description": variables["input"]["description"],
-                "isPrivate": variables["input"]["isPrivate"],
-            }
-            self.lists.append(created)
-            self.items[created["id"]] = set()
-            return {"createUserList": {"list": created}}
         if query == ASSIGN_LIST_MUTATION:
             return {"updateUserListsForItem": {"lists": []}}
         raise AssertionError("unexpected query")
@@ -239,7 +231,7 @@ class RetryTests(unittest.TestCase):
 
 class PartialResponseTests(unittest.TestCase):
     def execute_with_payload(
-        self, payload: dict[str, Any]
+        self, payload: dict[str, Any], allow_partial: bool = False
     ) -> tuple[dict[str, Any], str]:
         client = GitHubGraphQL("github_pat_example")
         response = io.BytesIO(json.dumps(payload).encode())
@@ -250,22 +242,46 @@ class PartialResponseTests(unittest.TestCase):
             ),
             contextlib.redirect_stderr(stderr),
         ):
-            return client.execute("query", {}), stderr.getvalue()
+            return (
+                client.execute("query", {}, allow_partial=allow_partial),
+                stderr.getvalue(),
+            )
 
-    def test_execute_keeps_partial_data_despite_node_errors(self):
+    def test_execute_keeps_partial_data_when_allowed(self):
         payload = {
             "data": {"node": {"items": {"nodes": [None, {"id": "R_ok"}]}}},
             "errors": [{"type": "FORBIDDEN", "message": "org token policy"}],
         }
 
-        data, stderr = self.execute_with_payload(payload)
+        data, stderr = self.execute_with_payload(payload, allow_partial=True)
 
         self.assertEqual(payload["data"], data)
         self.assertIn("FORBIDDEN", stderr)
 
+    def test_execute_rejects_partial_errors_by_default(self):
+        payload = {
+            "data": {"updateUserListsForItem": None},
+            "errors": [{"type": "FORBIDDEN", "message": "not accessible"}],
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "GraphQL errors"):
+            self.execute_with_payload(payload)
+
     def test_execute_raises_when_errors_leave_no_data(self):
         with self.assertRaisesRegex(RuntimeError, "GraphQL errors"):
-            self.execute_with_payload({"data": None, "errors": [{"message": "boom"}]})
+            self.execute_with_payload(
+                {"data": None, "errors": [{"message": "boom"}]}, allow_partial=True
+            )
+
+    def test_prepare_reads_tolerate_partial_errors_but_lists_query_is_strict(self):
+        client = FakeGraphQL()
+
+        prepare_input(client, 100, "full")
+
+        flags = dict(zip([call[0] for call in client.calls], client.partial_flags))
+        self.assertFalse(flags[LISTS_QUERY])
+        self.assertTrue(flags[LIST_ITEMS_QUERY])
+        self.assertTrue(flags[STARS_QUERY])
 
     def test_stars_skip_inaccessible_repositories(self):
         client = FakeGraphQL()
@@ -277,9 +293,13 @@ class PartialResponseTests(unittest.TestCase):
 
 
 class GitHubListTests(unittest.TestCase):
-    def test_rejects_non_fine_grained_tokens(self):
-        with self.assertRaisesRegex(ValueError, "fine-grained PAT"):
+    def test_rejects_unknown_token_prefixes(self):
+        with self.assertRaisesRegex(ValueError, "PAT"):
             GitHubGraphQL("ghu_example")
+
+    def test_accepts_fine_grained_and_classic_tokens(self):
+        GitHubGraphQL("github_pat_example")
+        GitHubGraphQL("ghp_example")
 
     def test_prepare_only_returns_unlisted_stars(self):
         prepared = prepare_input(FakeGraphQL(), 100, "full")
@@ -312,6 +332,23 @@ class GitHubListTests(unittest.TestCase):
         queries = [call[0] for call in client.calls]
         self.assertEqual(1, queries.count(LIST_ITEMS_QUERY))
 
+    def test_rejects_plans_that_propose_new_lists(self):
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
+        plan = empty_plan(prepared_input)
+        plan["new_lists"] = [{"key": "ai-ml", "name": "AI"}]
+        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "UL_tools"}]
+
+        with self.assertRaisesRegex(ValueError, "creating lists is not supported"):
+            validate_plan(prepared_input, plan)
+
+    def test_rejects_unknown_list_reference(self):
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
+        plan = empty_plan(prepared_input)
+        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "new:ai-ml"}]
+
+        with self.assertRaisesRegex(ValueError, "unknown list reference"):
+            validate_plan(prepared_input, plan)
+
     def test_weekly_scope_excludes_stars_older_than_seven_days(self):
         prepared = prepare_input(
             FakeGraphQL(), 100, "weekly", datetime(2026, 1, 10, tzinfo=UTC)
@@ -336,42 +373,30 @@ class GitHubListTests(unittest.TestCase):
         self.assertEqual(1, preview["assignments"])
         self.assertEqual({"UL_tools": 1}, preview["assignments_by_list"])
 
-    def test_apply_creates_list_and_assigns_repository(self):
+    def test_apply_assigns_repository_to_existing_list(self):
         client = FakeGraphQL()
         prepared_input = create_input(prepare_input(client, 100, "full"))
         plan = empty_plan(prepared_input)
-        plan["new_lists"] = [
-            {
-                "key": "ai-ml",
-                "name": "AI and Machine Learning",
-                "description": "AI tools",
-                "is_private": False,
-            }
-        ]
-        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "new:ai-ml"}]
+        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "UL_tools"}]
 
         result = apply_plan(client, prepared_input, plan)
 
-        self.assertEqual({"assigned": 1, "created_lists": 1}, result)
+        self.assertEqual({"assigned": 1}, result)
         assignment_calls = [
             call for call in client.calls if call[0] == ASSIGN_LIST_MUTATION
         ]
-        self.assertEqual(["UL_ai"], assignment_calls[0][1]["input"]["listIds"])
+        self.assertEqual(["UL_tools"], assignment_calls[0][1]["input"]["listIds"])
 
     def test_apply_preserves_concurrent_membership(self):
         client = FakeGraphQL()
+        client.lists.append(
+            {"id": "UL_two", "name": "Two", "description": "", "isPrivate": False}
+        )
+        client.items["UL_two"] = set()
         prepared_input = create_input(prepare_input(client, 100, "full"))
         plan = empty_plan(prepared_input)
         client.items["UL_tools"].add("R_new")
-        plan["new_lists"] = [
-            {
-                "key": "ai-ml",
-                "name": "AI and Machine Learning",
-                "description": "AI tools",
-                "is_private": False,
-            }
-        ]
-        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "new:ai-ml"}]
+        plan["assignments"] = [{"repository_id": "R_new", "list_ref": "UL_two"}]
 
         apply_plan(client, prepared_input, plan)
 
@@ -379,7 +404,7 @@ class GitHubListTests(unittest.TestCase):
             call for call in client.calls if call[0] == ASSIGN_LIST_MUTATION
         ]
         self.assertEqual(
-            ["UL_ai", "UL_tools"], assignment_calls[0][1]["input"]["listIds"]
+            ["UL_tools", "UL_two"], assignment_calls[0][1]["input"]["listIds"]
         )
 
     def test_rejects_modified_plan_source(self):

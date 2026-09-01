@@ -10,5 +10,9 @@ includes:
 config:
   - type: repo-secret
     name: COPILOT_GITHUB_TOKEN
-    prompt: Paste a fine-grained PAT for Copilot and GitHub Lists
-    description: Grant Copilot Requests and Starring (Read and write).
+    prompt: Paste a fine-grained PAT for Copilot inference only
+    description: Grant only Copilot Requests; Copilot CLI ignores classic tokens.
+  - type: repo-secret
+    name: STAR_LISTS_TOKEN
+    prompt: Paste a classic PAT for reading stars and updating Lists
+    description: Classic token with the user scope; Lists mutations reject fine-grained PATs.

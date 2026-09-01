@@ -80,12 +80,6 @@ query Stars($cursor: String) {
 }
 """
 
-CREATE_LIST_MUTATION = """
-mutation CreateList($input: CreateUserListInput!) {
-  createUserList(input: $input) { list { id name } }
-}
-"""
-
 ASSIGN_LIST_MUTATION = """
 mutation AssignList($input: UpdateUserListsForItemInput!) {
   updateUserListsForItem(input: $input) { lists { id name } }
@@ -94,19 +88,23 @@ mutation AssignList($input: UpdateUserListsForItemInput!) {
 
 
 class GraphQLExecutor(Protocol):
-    def execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
+    def execute(
+        self, query: str, variables: dict[str, Any], allow_partial: bool = False
+    ) -> dict[str, Any]: ...
 
 
 class GitHubGraphQL:
     def __init__(self, token: str, endpoint: str = "https://api.github.com/graphql"):
         if not token:
-            raise ValueError("COPILOT_GITHUB_TOKEN is required")
-        if not token.startswith("github_pat_"):
-            raise ValueError("COPILOT_GITHUB_TOKEN must be a fine-grained PAT")
+            raise ValueError("a GitHub token is required")
+        if not token.startswith(("github_pat_", "ghp_")):
+            raise ValueError("token must be a fine-grained or classic PAT")
         self.token = token
         self.endpoint = endpoint
 
-    def execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def execute(
+        self, query: str, variables: dict[str, Any], allow_partial: bool = False
+    ) -> dict[str, Any]:
         payload = json.dumps({"query": query, "variables": variables}).encode()
         request = urllib.request.Request(
             self.endpoint,
@@ -126,9 +124,10 @@ class GitHubGraphQL:
             body = error.read().decode(errors="replace")
             raise RuntimeError(f"GitHub GraphQL HTTP {error.code}: {body}") from error
         if result.get("errors"):
-            # Node-level errors (e.g. org token policies) null the affected
-            # nodes but leave the rest of the response usable.
-            if result.get("data") is None:
+            # allow_partial is for reads over foreign repositories, where
+            # node-level errors (e.g. org token policies) null the affected
+            # nodes but leave the rest usable. Mutations stay strict.
+            if not allow_partial or result.get("data") is None:
                 raise RuntimeError(f"GitHub GraphQL errors: {result['errors']}")
             print(
                 f"GitHub GraphQL partial errors: {result['errors']}",
@@ -158,7 +157,9 @@ def list_memberships(
 ) -> dict[str, set[str]]:
     memberships: dict[str, set[str]] = {}
     for list_id in list_ids:
-        node = client.execute(LIST_ITEMS_QUERY, {"id": list_id, "cursor": None})["node"]
+        node = client.execute(
+            LIST_ITEMS_QUERY, {"id": list_id, "cursor": None}, allow_partial=True
+        )["node"]
         if node is None:
             raise ValueError(f"GitHub list no longer exists: {list_id}")
         memberships[list_id] = remaining_item_ids(client, list_id, node["items"])
@@ -172,7 +173,7 @@ def remaining_item_ids(
     while connection["pageInfo"]["hasNextPage"]:
         cursor = connection["pageInfo"]["endCursor"]
         connection = client.execute(
-            LIST_ITEMS_QUERY, {"id": list_id, "cursor": cursor}
+            LIST_ITEMS_QUERY, {"id": list_id, "cursor": cursor}, allow_partial=True
         )["node"]["items"]
         item_ids.update(item["id"] for item in connection["nodes"] if item)
     return item_ids
@@ -184,9 +185,9 @@ def starred_repositories(
     cursor = None
     repositories: list[dict[str, Any]] = []
     while True:
-        connection = client.execute(STARS_QUERY, {"cursor": cursor})["viewer"][
-            "starredRepositories"
-        ]
+        connection = client.execute(
+            STARS_QUERY, {"cursor": cursor}, allow_partial=True
+        )["viewer"]["starredRepositories"]
         for edge in connection["edges"]:
             starred_at = datetime.fromisoformat(edge["starredAt"])
             if cutoff is not None and starred_at < cutoff:

@@ -74,7 +74,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
-    client = GitHubGraphQL(os.environ.get("COPILOT_GITHUB_TOKEN", ""))
+    client = GitHubGraphQL(os.environ.get("STAR_LISTS_TOKEN", ""))
     source = prepare_input(client, args.batch_size, args.scope)
     write_json(args.output, create_input(source))
 

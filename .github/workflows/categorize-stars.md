@@ -28,6 +28,10 @@ resources:
           - weekly
 permissions:
   contents: read
+safe-outputs:
+  create-issue:
+    title-prefix: "[star-organizer] "
+    max: 1
 engine: copilot
 model: gpt-5-mini
 steps:
@@ -43,7 +47,7 @@ steps:
     id: prepare
     env:
       BATCH_SIZE: "${{ github.event.inputs.batch_size || '500' }}"
-      COPILOT_GITHUB_TOKEN: "${{ secrets.COPILOT_GITHUB_TOKEN }}"
+      STAR_LISTS_TOKEN: "${{ secrets.STAR_LISTS_TOKEN }}"
       STAR_SCOPE: >-
         ${{ github.event_name == 'schedule' && 'weekly' ||
         github.event.inputs.scope || 'weekly' }}
@@ -66,7 +70,7 @@ post-steps:
   - name: Apply validated list assignments
     if: steps.prepare.outputs.has_changes == 'true'
     env:
-      COPILOT_GITHUB_TOKEN: "${{ secrets.COPILOT_GITHUB_TOKEN }}"
+      STAR_LISTS_TOKEN: "${{ secrets.STAR_LISTS_TOKEN }}"
     run: |
       uv run --frozen \
         --project .github/workflows/github-star-organizer \
@@ -164,15 +168,20 @@ plan. The `stats` object is informational and must not affect completeness.
 ## Classification rules
 
 1. Assign every repository in `repositories` exactly once.
-2. Prefer an appropriate entry from `existing_lists`, using its `id` as the
-   assignment's `list_ref`.
-3. Propose a new broad, reusable list only when no existing list is suitable.
-   Create no more than five new lists in one run and avoid near-duplicate names.
-4. Use topics first, then description, primary language, and repository name.
-5. Do not create owner-specific or repository-specific lists. Use `Other` only
-   when no meaningful category can be determined.
-6. Use one list per repository. Existing list memberships are preserved by the
+2. Choose the most suitable entry from `existing_lists` and use its `id` as
+   the assignment's `list_ref`. Never invent other list ids.
+3. Use topics first, then description, primary language, and repository name.
+4. When no list is a clear match, pick the closest broad list anyway.
+5. Use one list per repository. Existing list memberships are preserved by the
    deterministic apply step.
+
+## Suggesting new lists
+
+Lists are managed manually and are never created by this workflow. If several
+repositories in this batch lack a well-fitting list, use the create-issue safe
+output once to suggest new lists: include each proposed list name, a short
+description, and a few example repositories. Still assign those repositories
+to the closest existing list in the plan.
 
 ## Output format
 
@@ -181,27 +190,16 @@ Create the plan in this shape:
 ```json
 {
   "source_sha256": "copy exactly from the input",
-  "new_lists": [
-    {
-      "key": "ai-ml",
-      "name": "AI and Machine Learning",
-      "description": "AI, machine learning, and related tooling.",
-      "is_private": false
-    }
-  ],
   "assignments": [
     {
       "repository_id": "R_example",
-      "list_ref": "new:ai-ml"
-    },
-    {
-      "repository_id": "R_another",
       "list_ref": "UL_existing"
     }
   ]
 }
 ```
 
-Reference a proposed list as `new:<key>`. Include every repository ID from the
-input exactly once and no other IDs. Do not copy repository metadata into the
-plan. Finish after writing the plan; the post-step performs all mutations.
+Include every repository ID from the input exactly once and no other IDs.
+Every `list_ref` must be an `id` from `existing_lists`. Do not copy repository
+metadata into the plan. Finish after writing the plan; the post-step performs
+all mutations.

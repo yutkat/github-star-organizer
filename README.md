@@ -3,10 +3,11 @@
 This repository uses GitHub Agentic Workflows to categorize the authenticated
 user's starred repositories into their actual GitHub Lists once a week.
 
-It reads stars and existing Lists through GitHub's GraphQL API. The AI reuses a
-suitable existing List or proposes a broad new one, and a deterministic step
-validates the plan before calling `createUserList` and
-`updateUserListsForItem`.
+It reads stars and existing Lists through GitHub's GraphQL API. The AI files
+each star into the most suitable of your existing Lists, and a deterministic
+step validates the plan before calling `updateUserListsForItem`. Lists are
+managed manually: create them yourself at <https://github.com/stars>, and when
+the AI thinks a new List would help it opens an issue instead of creating one.
 
 ## Install
 
@@ -23,15 +24,18 @@ source for future updates. Pull upstream releases later with `gh aw update`.
 ## Setup
 
 1. Enable GitHub Actions in the repository where the package was installed.
-2. Create one fine-grained personal access token owned by the user whose stars
-   will be categorized. Grant `Copilot Requests`, `Starring: Read and write`,
-   and only the private repository access that is needed.
-3. Save the token as the Actions secret `COPILOT_GITHUB_TOKEN`.
+2. Create one classic personal access token with the `user` scope and save it
+   as the Actions secret `STAR_LISTS_TOKEN`. It reads stars and Lists and
+   performs the List updates; GitHub Lists mutations reject fine-grained
+   tokens, so this must be a classic token.
+3. Create one fine-grained personal access token owned by the same user with
+   only the `Copilot Requests` permission and save it as the Actions secret
+   `COPILOT_GITHUB_TOKEN`. It is used solely to authenticate the Copilot
+   engine, which ignores classic tokens.
 4. Run `Categorize starred repositories` manually from the Actions tab once.
 
-The same token authenticates the Copilot engine and the deterministic GitHub
-Lists steps. Set an expiration appropriate for the deployment and rotate the
-repository secret before it expires.
+Set expirations appropriate for the deployment and rotate the repository
+secrets before they expire.
 
 See GitHub's documentation for
 [creating a fine-grained PAT](https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
@@ -46,7 +50,8 @@ See GitHub's documentation for
 - Retrieves the token owner's stars and Lists, without a hard-coded username.
 - Skips repositories that already belong to at least one List.
 - Preserves existing and concurrent List memberships.
-- Lets the AI create at most five broad Lists per run.
+- Never creates or edits Lists; new List ideas are filed as issues on this
+  repository (at most one per run).
 - Writes classifications directly to GitHub Lists; no Markdown catalog is used.
 
 To avoid sending thousands of stars to the agent at once, each run normally
