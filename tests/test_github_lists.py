@@ -35,7 +35,6 @@ apply = load_runtime_module("apply")
 
 ASSIGN_LIST_MUTATION = github_api.ASSIGN_LIST_MUTATION
 CREATE_LIST_MUTATION = github_api.CREATE_LIST_MUTATION
-LIST_ITEMS_BATCH_QUERY = github_api.LIST_ITEMS_BATCH_QUERY
 LIST_ITEMS_QUERY = github_api.LIST_ITEMS_QUERY
 LISTS_QUERY = github_api.LISTS_QUERY
 STARS_QUERY = github_api.STARS_QUERY
@@ -95,18 +94,10 @@ class FakeGraphQL:
                 }
             }
         if query == LIST_ITEMS_QUERY:
+            if variables["id"] not in self.items:
+                return {"node": None}
             return {
                 "node": {"items": self.items_page(variables["id"], variables["cursor"])}
-            }
-        if query == LIST_ITEMS_BATCH_QUERY:
-            known = {item["id"] for item in self.lists}
-            return {
-                "nodes": [
-                    {"id": list_id, "items": self.items_page(list_id, None)}
-                    if list_id in known
-                    else None
-                    for list_id in variables["ids"]
-                ]
             }
         if query == STARS_QUERY:
             return {
@@ -157,7 +148,7 @@ def repo(repository_id: str, name: str) -> dict[str, Any]:
 
 
 class ListMembershipTests(unittest.TestCase):
-    def test_fetches_multiple_lists_in_one_batch_query(self):
+    def test_fetches_each_list_with_its_own_query(self):
         client = FakeGraphQL()
         client.lists.append(
             {"id": "UL_two", "name": "Two", "description": "", "isPrivate": False}
@@ -169,7 +160,12 @@ class ListMembershipTests(unittest.TestCase):
         self.assertEqual(
             {"UL_tools": {"R_listed"}, "UL_two": {"R_a", "R_b"}}, memberships
         )
-        self.assertEqual([LIST_ITEMS_BATCH_QUERY], [call[0] for call in client.calls])
+        self.assertEqual(
+            [LIST_ITEMS_QUERY, LIST_ITEMS_QUERY], [call[0] for call in client.calls]
+        )
+        self.assertEqual(
+            ["UL_tools", "UL_two"], [call[1]["id"] for call in client.calls]
+        )
 
     def test_paginates_lists_with_more_than_one_page(self):
         client = FakeGraphQL(page_size=1)
@@ -178,30 +174,8 @@ class ListMembershipTests(unittest.TestCase):
         memberships = list_memberships(client, ["UL_tools"])
 
         self.assertEqual({"UL_tools": {"R_a", "R_b", "R_c"}}, memberships)
-        followups = [call for call in client.calls if call[0] == LIST_ITEMS_QUERY]
-        self.assertEqual(2, len(followups))
-
-    def test_chunks_batches_of_one_hundred_lists(self):
-        client = FakeGraphQL()
-        list_ids = []
-        for index in range(101):
-            list_id = f"UL_{index}"
-            client.lists.append(
-                {
-                    "id": list_id,
-                    "name": str(index),
-                    "description": "",
-                    "isPrivate": False,
-                }
-            )
-            client.items[list_id] = set()
-            list_ids.append(list_id)
-
-        memberships = list_memberships(client, list_ids)
-
-        self.assertEqual(101, len(memberships))
-        batches = [call for call in client.calls if call[0] == LIST_ITEMS_BATCH_QUERY]
-        self.assertEqual(2, len(batches))
+        pages = [call for call in client.calls if call[0] == LIST_ITEMS_QUERY]
+        self.assertEqual(3, len(pages))
 
     def test_rejects_deleted_lists(self):
         with self.assertRaisesRegex(ValueError, "no longer exists"):
@@ -275,7 +249,7 @@ class GitHubListTests(unittest.TestCase):
         self.assertEqual(["R_new"], [item["id"] for item in prepared["repositories"]])
         self.assertEqual(1, prepared["stats"]["uncategorized_total"])
 
-    def test_prepare_fetches_memberships_with_one_batch_query(self):
+    def test_prepare_fetches_memberships_per_list(self):
         client = FakeGraphQL()
         client.lists.append(
             {"id": "UL_two", "name": "Two", "description": "", "isPrivate": False}
@@ -285,10 +259,9 @@ class GitHubListTests(unittest.TestCase):
         prepare_input(client, 100, "full")
 
         queries = [call[0] for call in client.calls]
-        self.assertEqual(1, queries.count(LIST_ITEMS_BATCH_QUERY))
-        self.assertNotIn(LIST_ITEMS_QUERY, queries)
+        self.assertEqual(2, queries.count(LIST_ITEMS_QUERY))
 
-    def test_apply_fetches_memberships_with_one_batch_query(self):
+    def test_apply_fetches_memberships_per_list(self):
         client = FakeGraphQL()
         prepared_input = create_input(prepare_input(client, 100, "full"))
         plan = empty_plan(prepared_input)
@@ -298,8 +271,7 @@ class GitHubListTests(unittest.TestCase):
         apply_plan(client, prepared_input, plan)
 
         queries = [call[0] for call in client.calls]
-        self.assertEqual(1, queries.count(LIST_ITEMS_BATCH_QUERY))
-        self.assertNotIn(LIST_ITEMS_QUERY, queries)
+        self.assertEqual(1, queries.count(LIST_ITEMS_QUERY))
 
     def test_weekly_scope_excludes_stars_older_than_seven_days(self):
         prepared = prepare_input(

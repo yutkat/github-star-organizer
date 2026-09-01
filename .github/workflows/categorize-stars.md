@@ -78,7 +78,7 @@ tools:
     - cat .github/aw-input/categorization-input.json
     - jq -r
     - jq -c
-timeout-minutes: 20
+timeout-minutes: 45
 ---
 
 # Weekly GitHub Star List Categorizer
