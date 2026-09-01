@@ -12,7 +12,7 @@ from typing import Any
 from github_api import (
     GitHubGraphQL,
     GraphQLExecutor,
-    list_item_ids,
+    list_memberships,
     paginated_lists,
     starred_repositories,
 )
@@ -36,8 +36,8 @@ def prepare_input(
 
     login, lists = paginated_lists(client)
     memberships: set[str] = set()
-    for user_list in lists:
-        memberships.update(list_item_ids(client, user_list["id"]))
+    for item_ids in list_memberships(client, [item["id"] for item in lists]).values():
+        memberships.update(item_ids)
 
     stars = starred_repositories(client, cutoff)
     uncategorized = [repo for repo in stars if repo["id"] not in memberships]

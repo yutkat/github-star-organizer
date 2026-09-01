@@ -14,7 +14,7 @@ from github_api import (
     CREATE_LIST_MUTATION,
     GitHubGraphQL,
     GraphQLExecutor,
-    list_item_ids,
+    list_memberships,
     paginated_lists,
 )
 from plan import verified_source
@@ -131,9 +131,10 @@ def apply_plan(
         created_count += 1
 
     current_memberships: dict[str, set[str]] = {}
-    for user_list in current_lists:
-        for repository_id in list_item_ids(client, user_list["id"]):
-            current_memberships.setdefault(repository_id, set()).add(user_list["id"])
+    all_ids = [item["id"] for item in current_lists]
+    for list_id, item_ids in list_memberships(client, all_ids).items():
+        for repository_id in item_ids:
+            current_memberships.setdefault(repository_id, set()).add(list_id)
 
     for repository_id, list_ref in assignments.items():
         target_id = (

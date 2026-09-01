@@ -33,6 +33,20 @@ query ListItems($id: ID!, $cursor: String) {
 }
 """
 
+LIST_ITEMS_BATCH_QUERY = """
+query ListItemsBatch($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on UserList {
+      id
+      items(first: 100) {
+        nodes { ... on Repository { id } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"""
+
 STARS_QUERY = """
 query Stars($cursor: String) {
   viewer {
@@ -126,20 +140,35 @@ def paginated_lists(client: GraphQLExecutor) -> tuple[str, list[dict[str, Any]]]
         cursor = connection["pageInfo"]["endCursor"]
 
 
-def list_item_ids(client: GraphQLExecutor, list_id: str) -> set[str]:
-    cursor = None
-    item_ids: set[str] = set()
-    while True:
-        node = client.execute(LIST_ITEMS_QUERY, {"id": list_id, "cursor": cursor})[
-            "node"
-        ]
-        if node is None:
-            raise ValueError(f"GitHub list no longer exists: {list_id}")
-        connection = node["items"]
-        item_ids.update(item["id"] for item in connection["nodes"] if item)
-        if not connection["pageInfo"]["hasNextPage"]:
-            return item_ids
+# nodes(ids:) accepts at most 100 ids per request.
+LIST_BATCH_SIZE = 100
+
+
+def list_memberships(
+    client: GraphQLExecutor, list_ids: list[str]
+) -> dict[str, set[str]]:
+    memberships: dict[str, set[str]] = {}
+    for start in range(0, len(list_ids), LIST_BATCH_SIZE):
+        chunk = list_ids[start : start + LIST_BATCH_SIZE]
+        nodes = client.execute(LIST_ITEMS_BATCH_QUERY, {"ids": chunk})["nodes"]
+        for list_id, node in zip(chunk, nodes, strict=True):
+            if not node or "items" not in node:
+                raise ValueError(f"GitHub list no longer exists: {list_id}")
+            memberships[list_id] = remaining_item_ids(client, list_id, node["items"])
+    return memberships
+
+
+def remaining_item_ids(
+    client: GraphQLExecutor, list_id: str, connection: dict[str, Any]
+) -> set[str]:
+    item_ids = {item["id"] for item in connection["nodes"] if item}
+    while connection["pageInfo"]["hasNextPage"]:
         cursor = connection["pageInfo"]["endCursor"]
+        connection = client.execute(
+            LIST_ITEMS_QUERY, {"id": list_id, "cursor": cursor}
+        )["node"]["items"]
+        item_ids.update(item["id"] for item in connection["nodes"] if item)
+    return item_ids
 
 
 def starred_repositories(
