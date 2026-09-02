@@ -33,7 +33,7 @@ safe-outputs:
     title-prefix: "[star-organizer] "
     max: 1
 engine: copilot
-model: gpt-5-mini
+model: gpt-5.6-luna
 steps:
   - name: Check out repository
     uses: actions/checkout@v7
