@@ -5,8 +5,11 @@ user's starred repositories into their actual GitHub Lists once a week.
 
 It reads stars and existing Lists through GitHub's GraphQL API. The AI files
 each star into the most suitable of your existing Lists, and a deterministic
-step validates the plan before calling `updateUserListsForItem`. Lists are
-managed manually: create them yourself at <https://github.com/stars>, and when
+step validates the plan before calling `updateUserListsForItem`. The agent runs
+the same validation in dry-run mode and repairs missing or invalid assignments
+before handing off the plan.
+
+Lists are managed manually: create them yourself at <https://github.com/stars>, and when
 the AI thinks a new List would help it opens an issue instead of creating one.
 
 ## Install

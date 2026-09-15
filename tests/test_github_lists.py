@@ -3,7 +3,10 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 import urllib.error
 from datetime import UTC, datetime
@@ -362,6 +365,65 @@ class GitHubListTests(unittest.TestCase):
         plan = empty_plan(prepared_input)
         with self.assertRaisesRegex(ValueError, "assignment mismatch"):
             validate_plan(prepared_input, plan)
+
+    def test_apply_rejects_incomplete_plan_before_any_api_calls(self):
+        client = FakeGraphQL()
+        prepared_input = create_input(prepare_input(client, 100, "full"))
+        client.calls.clear()
+
+        with self.assertRaisesRegex(ValueError, "assignment mismatch"):
+            apply_plan(client, prepared_input, empty_plan(prepared_input))
+
+        self.assertEqual([], client.calls)
+
+    def test_dry_run_cli_reports_missing_repository_and_accepts_repair(self):
+        client = FakeGraphQL()
+        client.star_edges = [
+            {"starredAt": "2026-01-02T00:00:00Z", "node": repo(f"R_{i}", f"o/r{i}")}
+            for i in range(500)
+        ]
+        prepared_input = create_input(prepare_input(client, 500, "full"))
+        plan = empty_plan(prepared_input)
+        plan["assignments"] = [
+            {"repository_id": item["id"], "list_ref": "UL_tools"}
+            for item in prepared_input["repositories"]
+        ]
+        omitted = plan["assignments"].pop(250)
+
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / apply.INPUT_FILENAME
+            plan_path = Path(directory) / "categorization-plan.json"
+            original_input = json.dumps(prepared_input)
+            input_path.write_text(original_input, encoding="utf-8")
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            command = [
+                sys.executable,
+                str(RUNTIME_PATH / "apply.py"),
+                "--plan",
+                str(plan_path),
+                "--dry-run",
+            ]
+            environment = {**os.environ, "STAR_LISTS_TOKEN": ""}
+
+            incomplete = subprocess.run(
+                command, capture_output=True, text=True, env=environment, check=False
+            )
+
+            self.assertNotEqual(0, incomplete.returncode)
+            self.assertIn("missing=['R_250'], extra=[]", incomplete.stderr)
+
+            plan["assignments"].append(omitted)
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            repaired = subprocess.run(
+                command, capture_output=True, text=True, env=environment, check=False
+            )
+
+            self.assertEqual(0, repaired.returncode, repaired.stderr)
+            self.assertEqual(
+                {"assignments": 500, "assignments_by_list": {"UL_tools": 500}},
+                json.loads(repaired.stdout),
+            )
+            self.assertEqual(original_input, input_path.read_text(encoding="utf-8"))
 
     def test_dry_run_previews_without_graphql_mutations(self):
         prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
