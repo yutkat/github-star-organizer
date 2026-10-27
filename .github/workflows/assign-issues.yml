@@ -1,4 +1,4 @@
-name: Notify categorization failures
+name: Assign categorization issues
 
 on:
   workflow_run:
@@ -12,21 +12,21 @@ permissions:
 
 jobs:
   assign:
-    name: Assign failure issues
+    name: Assign open issues
     runs-on: ubuntu-latest
     steps:
-      # gh-aw opens failure issues without assignees, so nobody gets notified.
-      # Its conclusion job finishes before this event, so the issues already exist.
-      - name: Assign open failure issues
+      # The workflow opens failure and List suggestion issues with GITHUB_TOKEN,
+      # which neither assigns anyone nor triggers `issues` events, so assign
+      # them here. gh-aw's conclusion job finishes before this event fires.
+      - name: Assign unassigned open issues
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          ASSIGNEE: ${{ vars.FAILURE_ISSUE_ASSIGNEE || github.repository_owner }}
+          ASSIGNEE: ${{ vars.ISSUE_ASSIGNEE || github.repository_owner }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
-          issues=$(gh issue list --state open --label agentic-workflows \
-            --json number,assignees \
+          issues=$(gh issue list --state open --json number,assignees \
             --jq '.[] | select(.assignees == []) | .number')
           for issue in $issues; do
             gh issue edit "$issue" --add-assignee "$ASSIGNEE"
