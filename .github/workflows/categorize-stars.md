@@ -20,13 +20,19 @@ resources:
         default: 500
         type: number
       scope:
-        description: Process the full backlog or only stars from the last 7 days
+        description: >-
+          Process stars from the last 7 days (weekly), 30/90/180/365 days, or
+          the full backlog
         required: false
         default: weekly
         type: choice
         options:
-          - full
           - weekly
+          - 1month
+          - 3month
+          - 6month
+          - 1year
+          - full
 permissions:
   contents: read
 safe-outputs:

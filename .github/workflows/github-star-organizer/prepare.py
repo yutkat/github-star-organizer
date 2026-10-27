@@ -18,6 +18,9 @@ from github_api import (
 )
 from plan import create_input
 
+SCOPE_DAYS = {"weekly": 7, "1month": 30, "3month": 90, "6month": 180, "1year": 365}
+SCOPES = (*SCOPE_DAYS, "full")
+
 
 def prepare_input(
     client: GraphQLExecutor,
@@ -27,12 +30,12 @@ def prepare_input(
 ) -> dict[str, Any]:
     if not 1 <= batch_size <= 500:
         raise ValueError("batch_size must be between 1 and 500")
-    if scope not in {"full", "weekly"}:
-        raise ValueError("scope must be full or weekly")
+    if scope not in SCOPES:
+        raise ValueError(f"scope must be one of {', '.join(SCOPES)}")
 
     cutoff = None
-    if scope == "weekly":
-        cutoff = (now or datetime.now(UTC)) - timedelta(days=7)
+    if scope in SCOPE_DAYS:
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=SCOPE_DAYS[scope])
 
     login, lists = paginated_lists(client)
     memberships: set[str] = set()
@@ -67,7 +70,7 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--batch-size", type=int, default=500)
-    result.add_argument("--scope", choices=("full", "weekly"), default="weekly")
+    result.add_argument("--scope", choices=SCOPES, default="weekly")
     result.add_argument("--output", type=Path, required=True)
     return result
 

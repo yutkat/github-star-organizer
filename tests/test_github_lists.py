@@ -360,6 +360,27 @@ class GitHubListTests(unittest.TestCase):
         self.assertEqual([], prepared["repositories"])
         self.assertEqual(0, prepared["stats"]["starred_in_scope"])
 
+    def test_period_scopes_look_back_their_number_of_days(self):
+        now = datetime(2026, 2, 1, tzinfo=UTC)
+        expected_starts = {
+            "1month": "2026-01-02T00:00:00+00:00",
+            "3month": "2025-11-03T00:00:00+00:00",
+            "6month": "2025-08-05T00:00:00+00:00",
+            "1year": "2025-02-01T00:00:00+00:00",
+        }
+        for scope, started_at in expected_starts.items():
+            with self.subTest(scope):
+                prepared = prepare_input(FakeGraphQL(), 100, scope, now)
+
+                self.assertEqual(started_at, prepared["stats"]["scope_started_at"])
+                self.assertEqual(
+                    ["R_new"], [repo["id"] for repo in prepared["repositories"]]
+                )
+
+    def test_unknown_scope_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "scope must be one of"):
+            prepare_input(FakeGraphQL(), 100, "2year")
+
     def test_plan_requires_each_repository_exactly_once(self):
         prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
         plan = empty_plan(prepared_input)

@@ -54,7 +54,8 @@ See GitHub's documentation for
 - Runs weekly on Monday at a time distributed by GitHub Agentic Workflows and
   supports manual dispatch.
 - Scheduled runs inspect only stars added during the preceding seven days.
-- Manual runs default to the same weekly scope; select `full` explicitly to
+- Manual runs default to the same weekly scope; select `1month`, `3month`,
+  `6month`, or `1year` to look back 30, 90, 180, or 365 days, or `full` to
   process the complete uncategorized backlog.
 - Retrieves the token owner's stars and Lists, without a hard-coded username.
 - Skips repositories that already belong to at least one List.
@@ -65,8 +66,9 @@ See GitHub's documentation for
 
 To avoid sending thousands of stars to the agent at once, each run normally
 processes up to 500 uncategorized repositories. Repeat manual runs to complete
-the initial backfill. Run the manual `full` scope after a failed or disabled
-scheduled run to recover stars outside the seven-day window.
+the initial backfill. After a failed or disabled scheduled run, run a manual
+scope that covers the gap (or `full`) to recover stars outside the seven-day
+window.
 
 If you edit the Agentic Workflow source, run `gh aw compile` and commit the
 generated `.github/workflows/categorize-stars.lock.yml` as well.
