@@ -425,6 +425,66 @@ class GitHubListTests(unittest.TestCase):
             )
             self.assertEqual(original_input, input_path.read_text(encoding="utf-8"))
 
+    def test_jq_validator_matches_dry_run_validation(self):
+        prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
+        repository_ids = [item["id"] for item in prepared_input["repositories"]]
+
+        def run_validator(plan: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+            with tempfile.TemporaryDirectory() as directory:
+                input_path = Path(directory) / apply.INPUT_FILENAME
+                plan_path = Path(directory) / "categorization-plan.json"
+                input_path.write_text(json.dumps(prepared_input), encoding="utf-8")
+                plan_path.write_text(json.dumps(plan), encoding="utf-8")
+                command = [
+                    "jq",
+                    "-n",
+                    "--slurpfile",
+                    "input",
+                    str(input_path),
+                    "--slurpfile",
+                    "plan",
+                    str(plan_path),
+                    "-f",
+                    str(RUNTIME_PATH / "validate-plan.jq"),
+                ]
+                return subprocess.run(
+                    command, capture_output=True, text=True, check=False
+                )
+
+        plan = empty_plan(prepared_input)
+        plan["assignments"] = [
+            {"repository_id": repository_id, "list_ref": "UL_tools"}
+            for repository_id in repository_ids
+        ]
+        valid = run_validator(plan)
+        self.assertEqual(0, valid.returncode, valid.stderr)
+        self.assertEqual(
+            apply.preview_plan(prepared_input, plan), json.loads(valid.stdout)
+        )
+
+        invalid_plans = {
+            "assignment mismatch; missing=": {**plan, "assignments": []},
+            "duplicate assignment for": {
+                **plan,
+                "assignments": plan["assignments"] + plan["assignments"][:1],
+            },
+            "unknown list reference": {
+                **plan,
+                "assignments": [
+                    {"repository_id": repository_ids[0], "list_ref": "UL_invented"}
+                ],
+            },
+            "plan does not match": {**plan, "source_sha256": "0" * 64},
+            "creating lists is not supported": {**plan, "new_lists": [{"name": "x"}]},
+        }
+        for message, invalid_plan in invalid_plans.items():
+            with self.subTest(message):
+                with self.assertRaisesRegex(ValueError, message):
+                    apply.validate_plan(prepared_input, invalid_plan)
+                result = run_validator(invalid_plan)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+
     def test_dry_run_previews_without_graphql_mutations(self):
         prepared_input = create_input(prepare_input(FakeGraphQL(), 100, "full"))
         plan = empty_plan(prepared_input)

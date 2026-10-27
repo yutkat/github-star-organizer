@@ -7,6 +7,7 @@ resources:
   - github-star-organizer/plan.py
   - github-star-organizer/prepare.py
   - github-star-organizer/apply.py
+  - github-star-organizer/validate-plan.jq
   - github-star-organizer/pyproject.toml
   - github-star-organizer/uv.lock
 "on":
@@ -81,10 +82,6 @@ tools:
   bash:
     - cat .github/aw-input/categorization-input.json
     - "jq *"
-    - >-
-      uv run --frozen --project .github/workflows/github-star-organizer
-      python .github/workflows/github-star-organizer/apply.py
-      --plan .github/aw-input/categorization-plan.json --dry-run
 timeout-minutes: 45
 ---
 
@@ -106,10 +103,9 @@ A deterministic post-step verifies the input digest and plan before applying it
 with GitHub GraphQL mutations. The API token is not available to you.
 
 Work directly in this agent and do not delegate to a sub-agent. Do not invoke
-Node.js, Git, heredocs, file copies, or exploratory shell commands. Python may
-only be invoked through the exact dry-run validation command below. Use the
-exact allowlisted `jq` commands to read the digest, existing Lists, and five
-repository chunks. Empty trailing chunks are expected. After reading the
+Node.js, Python, uv, Git, heredocs, file copies, or exploratory shell
+commands. Use the exact `jq` commands below to read the digest, existing Lists,
+and five repository chunks. Empty trailing chunks are expected. After reading the
 chunks, write the complete plan with the edit tool, then validate and repair it
 as described below.
 
@@ -214,10 +210,10 @@ metadata into the plan.
 After writing the plan, run this command without modification:
 
 ```bash
-uv run --frozen --project .github/workflows/github-star-organizer python .github/workflows/github-star-organizer/apply.py --plan .github/aw-input/categorization-plan.json --dry-run
+jq -n --slurpfile input .github/aw-input/categorization-input.json --slurpfile plan .github/aw-input/categorization-plan.json -f .github/workflows/github-star-organizer/validate-plan.jq
 ```
 
-This checks the input digest, list references, and exact repository coverage
+This checks the plan digest, list references, and exact repository coverage
 without an API token or any GitHub API calls. If it fails, use the error to fix
 the plan with the edit tool and rerun the same command. For an assignment
 mismatch, add every `missing` repository using its input metadata and remove
