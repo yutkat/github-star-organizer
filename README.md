@@ -37,6 +37,12 @@ source for future updates. Pull upstream releases later with `gh aw update`.
    engine, which ignores classic tokens.
 4. Run `Categorize starred repositories` manually from the Actions tab once.
 
+Failed or incomplete runs open an `agentic-workflows` issue. The
+`notify-failure.yml` workflow assigns those issues to the repository owner (or
+the user in the `FAILURE_ISSUE_ASSIGNEE` Actions variable) so the failure
+triggers a notification. It is not part of the `gh aw add` package; copy it
+manually into installed repositories.
+
 Set expirations appropriate for the deployment and rotate the repository
 secrets before they expire.
 
