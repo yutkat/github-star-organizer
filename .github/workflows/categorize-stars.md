@@ -40,7 +40,7 @@ safe-outputs:
     title-prefix: "[star-organizer] "
     max: 1
 engine: copilot
-model: gpt-5.6-terra
+model: gpt-6.1-terra
 steps:
   - name: Check out repository
     uses: actions/checkout@v7
