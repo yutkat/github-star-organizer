@@ -40,14 +40,14 @@ safe-outputs:
     title-prefix: "[star-organizer] "
     max: 1
 engine: copilot
-model: gpt-6.1-terra
+model: gpt-6.1-sol
 steps:
   - name: Check out repository
     uses: actions/checkout@v7
     with:
       persist-credentials: false
   - name: Set up uv
-    uses: astral-sh/setup-uv@v9
+    uses: astral-sh/setup-uv@v9.0.0
     with:
       enable-cache: true
   - name: Collect uncategorized stars and existing lists
@@ -74,15 +74,52 @@ steps:
         echo "has_changes=true" >> "$GITHUB_OUTPUT"
       fi
 post-steps:
-  - name: Apply validated list assignments
+  - name: Upload categorization plan
     if: steps.prepare.outputs.has_changes == 'true'
-    env:
-      STAR_LISTS_TOKEN: "${{ secrets.STAR_LISTS_TOKEN }}"
-    run: |
-      uv run --frozen \
-        --project .github/workflows/github-star-organizer \
-        python .github/workflows/github-star-organizer/apply.py \
-        --plan .github/aw-input/categorization-plan.json
+    uses: actions/upload-artifact@v7
+    with:
+      name: categorization-plan
+      path: |
+        .github/aw-input/categorization-input.json
+        .github/aw-input/categorization-plan.json
+      include-hidden-files: true
+      if-no-files-found: error
+jobs:
+  # Secrets are not allowed in post-steps, so mutations run in a job gated on
+  # threat detection.
+  apply_list_assignments:
+    needs:
+      - agent
+      - detection
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download categorization plan
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: categorization-plan
+          path: .github/aw-input
+      - name: Set up uv
+        if: steps.download.outcome == 'success'
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: false
+      - name: Apply validated list assignments
+        if: steps.download.outcome == 'success'
+        env:
+          STAR_LISTS_TOKEN: "${{ secrets.STAR_LISTS_TOKEN }}"
+        run: |
+          uv run --frozen \
+            --project .github/workflows/github-star-organizer \
+            python .github/workflows/github-star-organizer/apply.py \
+            --plan .github/aw-input/categorization-plan.json
 tools:
   edit: null
   bash:
@@ -105,7 +142,7 @@ as classification metadata.
 
 Only create `.github/aw-input/categorization-plan.json`. Do not edit the input,
 tracked files, or call GitHub APIs. Copy `source_sha256` from the input exactly.
-A deterministic post-step verifies the input digest and plan before applying it
+A deterministic job verifies the input digest and plan before applying it
 with GitHub GraphQL mutations. The API token is not available to you.
 
 Work directly in this agent and do not delegate to a sub-agent. Do not invoke
@@ -227,4 +264,4 @@ every `extra` ID. Also fix any duplicate assignments or unknown list references.
 Do not remove repositories from the input or change its digest to pass validation.
 
 Finish only after the command exits successfully and reports the assignment
-counts. The post-step validates again and performs all mutations.
+counts. A later job validates again and performs all mutations.
